@@ -1,0 +1,63 @@
+#!/bin/sh
+
+dircat_program_name=dircat
+dircat_version_string=v0.0.2
+
+# List all regular files in a directory tree by inode and cksum
+# Uses `ls` instead of `stat` for POSIX compatibility
+
+usage() {
+	echo "Usage: $0 [directory]"
+	echo Print a concise descriptive list of all files in the \
+		directory hierarchy rooted in the given directory or the working \
+		directory if none is given.
+}
+
+version() {
+	echo "$dircat_program_name $dircat_version_string"
+}
+
+dircat_header() {
+	echo inode cksum bytes filename
+}
+
+# TODO: allow options, like -h, -v, -w (warn only, don't make catalog), -u (don't print unsupported file/directory names), etc
+
+FINDDIR="${1:-.}"
+if [ ! -d "$FINDDIR" ]; then
+	echo "Directory $FINDDIR not found" >&2
+	usage >&2
+	exit 1
+fi
+
+# TODO: should other filenames be disallowed, such as (hypothetically) those with other control characters like backspace?
+# TODO: consider warning or error with access error
+
+# Warn if there are special files. This includes any file that's not a regular
+# file or directory, as well as any regular file whose name contains a newline.
+badfiles="$(find "$FINDDIR" \( -not -type f -and -not -type d \) -or \( -type f -and -name '*
+*' \) | wc -c | tr -d -c '0-9')"
+if [ "$badfiles" -ne 0 ]; then
+	echo "Warning: there are irregular files beneath the directory '$FINDDIR'" >&2
+fi
+
+dircat_header
+
+# TODO: since specifying inode, limit to same filesystem? Probably not POSIX
+
+# shellcheck disable=SC2016 # allow unusual quoting for final '-exec'
+find "$FINDDIR" \
+	\( \( -not -type f -and -not -type d \) \
+	-exec echo "Unsupported file type:" {} ";" -and -exec echo "--" ";" \) -or \
+	\( \( -type d -and -name '*
+*' \) \
+	-exec echo "Unsupported directory name:" {} ";" -and -exec echo "--" ";" -and -prune \) -or \
+	\( \( -type f -and -name '*
+*' \) \
+	-exec echo "Unsupported file name:" {} ";" -and -exec echo "--" ";" \) -or \
+	\( -type f -and -exec sh '-c' \
+	'filename="$1" &&
+		sum="$( cksum "$filename" )" &&
+		iname="$( ls -i "$filename" | sed '"'"'s/^[[:space:]]*\([0-9][0-9]*\)[[:space:]].*$/\1/'"'"' )" &&
+		echo "$iname" "$sum"' \
+	_ {} ";" \)
