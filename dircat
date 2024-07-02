@@ -1,16 +1,18 @@
 #!/bin/sh
 
 dircat_program_name=dircat
-dircat_version_string=v0.0.2
+dircat_version_string=v0.0.x
 
 # List all regular files in a directory tree by inode and cksum
 # Uses `ls` instead of `stat` for POSIX compatibility
 
 usage() {
 	echo "Usage: $0 [directory]"
+	echo "       $0 catfile1 catfile1"
 	echo Print a concise descriptive list of all files in the \
-		directory hierarchy rooted in the given directory or the working \
-		directory if none is given.
+		directory hierarchy rooted in the given directory \(or the working \
+		directory if none is given\), or compare the output of two \
+		previously-made lists
 }
 
 version() {
@@ -21,43 +23,92 @@ dircat_header() {
 	echo inode cksum bytes filename
 }
 
+compare_files() {
+	# compare files "$1" and "$2"
+	true
+}
 # TODO: allow options, like -h, -v, -w (warn only, don't make catalog), -u (don't print unsupported file/directory names), etc
 
-FINDDIR="${1:-.}"
-if [ ! -d "$FINDDIR" ]; then
-	echo "Directory $FINDDIR not found" >&2
+FINDDIR=""
+CATFILE1=""
+CATFILE2=""
+
+case "$#" in
+	"0")
+		FINDDIR="."
+		;;
+	"1")
+		if [ -z "$1" ]; then
+			echo "Error: argument may not be empty" >&2
+			usage >&2
+			exit 1
+		fi
+		FINDDIR="$1"
+		;;
+	"2")
+		CATFILE1="$1"
+		CATFILE2="$2"
+		if [ -z "$CATFILE1" ] || [ -z "$CATFILE2" ]; then
+			echo "Error: argument may not be empty" >&2
+			usage >&2
+			exit 1
+		fi
+		;;
+	*)
+		echo "Error: too many arguments" >&2
+		usage >&2
+		exit 1
+		;;
+esac
+
+if [ -n "$FINDDIR" ] && [ ! -d "$FINDDIR" ]; then
+	echo "Error: Directory '$FINDDIR' not found" >&2
 	usage >&2
 	exit 1
-fi
+elif [ -z "$FINDDIR" ]; then
+	for file in "$CATFILE1" "$CATFILE2"; do
+		if [ ! -f "$file" ]; then
+			echo "Error: File '$file' not found" >&2
+			usage >&2
+			exit 1
+		fi
+	done
+	if ! compare_files "$CATFILE1" "$CATFILE2"; then
+		echo "Error: Unable to compare '$CATFILE1' to '$CATFILE2'" >&2
+		exit 1
+	fi
+else
 
-# TODO: should other filenames be disallowed, such as (hypothetically) those with other control characters like backspace?
-# TODO: consider warning or error with access error
+	# TODO: should other filenames be disallowed, such as (hypothetically) those with other control characters like backspace?
+	# TODO: consider warning or error with access error
 
-# Warn if there are special files. This includes any file that's not a regular
-# file or directory, as well as any regular file whose name contains a newline.
-badfiles="$(find "$FINDDIR" \( -not -type f -and -not -type d \) -or \( -type f -and -name '*
+	# Warn if there are special files. This includes any file that's not a regular
+	# file or directory, as well as any regular file whose name contains a newline.
+	badfiles="$(find "$FINDDIR" \( -not -type f -and -not -type d \) -or \( -type f -and -name '*
 *' \) | wc -c | tr -d -c '0-9')"
-if [ "$badfiles" -ne 0 ]; then
-	echo "Warning: there are irregular files beneath the directory '$FINDDIR'" >&2
-fi
+	if [ "$badfiles" -ne 0 ]; then
+		echo "Warning: there are irregular files beneath the directory '$FINDDIR'" >&2
+	fi
 
-dircat_header
+	dircat_header
 
-# TODO: since specifying inode, limit to same filesystem? Probably not POSIX
+	# TODO: since specifying inode, limit to same filesystem? Probably not POSIX
 
-# shellcheck disable=SC2016 # allow unusual quoting for final '-exec'
-find "$FINDDIR" \
-	\( \( -not -type f -and -not -type d \) \
-	-exec echo "Unsupported file type:" {} ";" -and -exec echo "--" ";" \) -or \
-	\( \( -type d -and -name '*
+	# shellcheck disable=SC2016 # allow unusual quoting for final '-exec'
+	find "$FINDDIR" \
+		\( \( -not -type f -and -not -type d \) \
+		-exec echo "Unsupported file type:" {} ";" -and -exec echo "--" ";" \) -or \
+		\( \( -type d -and -name '*
 *' \) \
-	-exec echo "Unsupported directory name:" {} ";" -and -exec echo "--" ";" -and -prune \) -or \
-	\( \( -type f -and -name '*
+		-exec echo "Unsupported directory name:" {} ";" -and -exec echo "--" ";" -and -prune \) -or \
+		\( \( -type f -and -name '*
 *' \) \
-	-exec echo "Unsupported file name:" {} ";" -and -exec echo "--" ";" \) -or \
-	\( -type f -and -exec sh '-c' \
-	'filename="$1" &&
+		-exec echo "Unsupported file name:" {} ";" -and -exec echo "--" ";" \) -or \
+		\( -type f -and -exec sh '-c' \
+		'filename="$1" &&
 		sum="$( cksum "$filename" )" &&
 		iname="$( ls -i "$filename" | sed '"'"'s/^[[:space:]]*\([0-9][0-9]*\)[[:space:]].*$/\1/'"'"' )" &&
 		echo "$iname" "$sum"' \
-	_ {} ";" \)
+		_ {} ";" \)
+
+fi
